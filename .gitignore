@@ -1,8 +1,7 @@
 #
 .idea/
-
-#
 .aws-sam/
+env.json
 
 # Created by https://www.gitignore.io/api/osx,linux,python,windows,pycharm,visualstudiocode
 

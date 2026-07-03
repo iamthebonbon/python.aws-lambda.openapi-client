@@ -1,5 +1,9 @@
 import json
 import os
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 from openai import OpenAI
 
@@ -118,14 +122,20 @@ def lambda_handler(event, context):
     is passed back in the response so the caller can resend it on the next
     request; nothing is persisted between invocations.
     """
-    body = json.loads(event.get("body") or "{}")
-    prompt = body.get("prompt", "")
-    history = body.get("history") or [{"role": "system", "content": SYSTEM_PROMPT}]
+    try:
+        body = json.loads(event.get("body") or "{}")
+        prompt = body.get("prompt", "")
+        history = body.get("history") or [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    history.append({"role": "user", "content": prompt})
-    history = run_agent(history, build_tools())
+        history.append({"role": "user", "content": prompt})
+        history = run_agent(history, build_tools())
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"reply": history[-1]["content"], "history": history}),
-    }
+        result = {
+            "statusCode": 200,
+            "body": json.dumps({"reply": history[-1]["content"], "history": history}),
+        }
+        logger.info("Returning: %s", result)
+        return result
+    except Exception as e:
+        logger.exception("Handler failed")  # logs full traceback
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
