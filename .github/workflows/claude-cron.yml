@@ -1,0 +1,44 @@
+name: Claude Cron — Auto-pick Issue
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude on open issues
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          allowed_bots: claude
+          claude_args: |
+            --allowedTools "Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Skill,Bash(git *),Bash(gh *),Bash(python *)"
+          prompt: |
+            Use `gh issue list --state open` to find open issues in this repo.
+            # Instructions
+            - Always clear context before you start from new request
+            # Scenarios
+            1. You are called by `cron`
+            2. Overview opened tickets and pick one according to priority
+            2.1. If there is no open issue then do nothing
+            3. Leave comment that issue is taken
+            3.1 If issue seems complex create sub-tickets to decompose complicated task
+            3.2 If issue is simple enough to be implemented then...
+            3.2.1 Implement the changes described in that issue
+            3.2.2 Propose changes in new branch and create PR with `closes issue` feature
