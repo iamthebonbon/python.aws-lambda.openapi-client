@@ -35,6 +35,15 @@ To use the SAM CLI, you need the following tools.
 * [Python 3 installed](https://www.python.org/downloads/)
 * Docker - [Install Docker community edition](https://hub.docker.com/search/?type=edition&offering=community)
 
+`AgentFunction` resolves its `OPENAI_API_KEY` from SSM Parameter Store at deploy time (`/openai-client/openai-api-key`), so this parameter must exist before the first deploy, otherwise `sam deploy` fails to create the changeset:
+
+```bash
+aws ssm put-parameter \
+  --name /openai-client/openai-api-key \
+  --type String \
+  --value "<your-openai-api-key>"
+```
+
 To build and deploy your application for the first time, run the following in your shell:
 
 ```bash
