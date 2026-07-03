@@ -1,21 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  openapi-client
-
-  Sample SAM Template for openapi-client
-
-Parameters:
-  OpenAIApiKey:
-    Type: String
-    NoEcho: true
-    Description: API key used by AgentFunction to call the OpenAI API
+Description: |
+  openai-client
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 15
-
+    Timeout: 30
     # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
     LoggingConfig:
       LogFormat: JSON
@@ -27,7 +18,7 @@ Resources:
       Auth:
         ApiKeyRequired: true
 
-  HelloWorldFunction:
+  MainFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: app/
@@ -36,11 +27,11 @@ Resources:
       Architectures:
       - x86_64
       Events:
-        HelloWorld:
+        Main:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             RestApiId: !Ref OpenApiClientApi
-            Path: /hello
+            Path: /main
             Method: get
 
   AgentFunction:
@@ -53,7 +44,7 @@ Resources:
       - x86_64
       Environment:
         Variables:
-          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_API_KEY: "{{resolve:ssm:/openai-client/openai-api-key}}"
       Events:
         Agent:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -99,16 +90,13 @@ Resources:
       UsagePlanId: !Ref UsagePlan
 
 Outputs:
-  HelloWorldApi:
-    Description: API Gateway endpoint URL for Prod stage for Hello World
+  MainApi:
+    Description: API Gateway endpoint URL for Prod stage for Main function
       function
-    Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
-  HelloWorldFunction:
-    Description: Hello World Lambda Function ARN
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: Implicit IAM Role created for Hello World function
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+    Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/main/"
+  MainFunction:
+    Description: Main Lambda Function ARN
+    Value: !GetAtt MainFunction.Arn
   AgentApi:
     Description: API Gateway endpoint URL for Prod stage for the Agent function
     Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/agent/"

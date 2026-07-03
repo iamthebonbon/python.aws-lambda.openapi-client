@@ -34,7 +34,7 @@ class TestApiGateway:
     @pytest.fixture()
     def api_gateway_url(self, stack_outputs):
         """ Get the API Gateway URL from Cloudformation Stack outputs """
-        return stack_outputs["HelloWorldApi"]
+        return stack_outputs["MainApi"]
 
     @pytest.fixture()
     def api_key(self, stack_outputs):
