@@ -3,7 +3,7 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "butler-agent"
+stack_name = "openapi-client"
 
 [default.build.parameters]
 cached = true

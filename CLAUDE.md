@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-This is an AWS SAM (Serverless Application Model) Python 3.12 Lambda application, currently the default `sam init` "hello world" scaffold (stack name `butler-agent`). Despite the repo directory name (`python.aws-lambda.openapi-client`), no OpenAPI client code exists yet — the codebase is still just the unmodified Hello World template.
+This is an AWS SAM (Serverless Application Model) Python 3.12 Lambda application, currently the default `sam init` "hello world" scaffold (stack name `openapi-client`). Despite the repo directory name (`python.aws-lambda.openapi-client`), no OpenAPI client code exists yet — the codebase is still just the unmodified Hello World template.
 
 ## Commands
 
@@ -46,17 +46,17 @@ python -m pytest tests/unit -v
 python -m pytest tests/unit/test_handler.py::test_lambda_handler -v
 
 # integration tests — require a deployed stack
-AWS_SAM_STACK_NAME="butler-agent" python -m pytest tests/integration -v
+AWS_SAM_STACK_NAME="openapi-client" python -m pytest tests/integration -v
 ```
 
 Tail deployed function logs:
 ```bash
-sam logs -n HelloWorldFunction --stack-name "butler-agent" --tail
+sam logs -n HelloWorldFunction --stack-name "openapi-client" --tail
 ```
 
 Delete the deployed stack:
 ```bash
-sam delete --stack-name "butler-agent"
+sam delete --stack-name "openapi-client"
 ```
 
 ## Architecture

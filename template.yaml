@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  butler-agent
+  openapi-client
 
-  Sample SAM Template for butler-agent
+  Sample SAM Template for openapi-client
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -14,7 +14,7 @@ Globals:
     LoggingConfig:
       LogFormat: JSON
 Resources:
-  ButlerAgentApi:
+  OpenApiClientApi:
     Type: AWS::Serverless::Api # Explicit API to enable ApiKeyRequired
     Properties:
       StageName: Prod
@@ -33,31 +33,31 @@ Resources:
         HelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            RestApiId: !Ref ButlerAgentApi
+            RestApiId: !Ref OpenApiClientApi
             Path: /hello
             Method: get
 
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
     DependsOn:
-    - ButlerAgentApiProdStage
+    - OpenApiClientApiProdStage
     Properties:
-      Name: butler-agent-api-key
-      Description: API key required to call the butler-agent API
+      Name: openapi-client-api-key
+      Description: API key required to call the openapi-client API
       Enabled: true
       StageKeys:
-      - RestApiId: !Ref ButlerAgentApi
+      - RestApiId: !Ref OpenApiClientApi
         StageName: Prod
 
   UsagePlan:
     Type: AWS::ApiGateway::UsagePlan
     DependsOn:
-    - ButlerAgentApiProdStage
+    - OpenApiClientApiProdStage
     Properties:
-      UsagePlanName: butler-agent-usage-plan
-      Description: Throttling and quota applied to callers of the butler-agent API key
+      UsagePlanName: openapi-client-usage-plan
+      Description: Throttling and quota applied to callers of the openapi-client API key
       ApiStages:
-      - ApiId: !Ref ButlerAgentApi
+      - ApiId: !Ref OpenApiClientApi
         Stage: Prod
       Throttle:
         RateLimit: 10
@@ -77,7 +77,7 @@ Outputs:
   HelloWorldApi:
     Description: API Gateway endpoint URL for Prod stage for Hello World
       function
-    Value: !Sub "https://${ButlerAgentApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
+    Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
   HelloWorldFunction:
     Description: Hello World Lambda Function ARN
     Value: !GetAtt HelloWorldFunction.Arn
