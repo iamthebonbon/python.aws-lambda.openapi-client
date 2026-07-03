@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  butler-agent
+
+  Sample SAM Template for butler-agent
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+    # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
+    LoggingConfig:
+      LogFormat: JSON
+Resources:
+  ButlerAgentApi:
+    Type: AWS::Serverless::Api # Explicit API to enable ApiKeyRequired
+    Properties:
+      StageName: Prod
+      Auth:
+        ApiKeyRequired: true
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures:
+      - x86_64
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            RestApiId: !Ref ButlerAgentApi
+            Path: /hello
+            Method: get
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn:
+    - ButlerAgentApiProdStage
+    Properties:
+      Name: butler-agent-api-key
+      Description: API key required to call the butler-agent API
+      Enabled: true
+      StageKeys:
+      - RestApiId: !Ref ButlerAgentApi
+        StageName: Prod
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn:
+    - ButlerAgentApiProdStage
+    Properties:
+      UsagePlanName: butler-agent-usage-plan
+      Description: Throttling and quota applied to callers of the butler-agent API key
+      ApiStages:
+      - ApiId: !Ref ButlerAgentApi
+        Stage: Prod
+      Throttle:
+        RateLimit: 10
+        BurstLimit: 20
+      Quota:
+        Limit: 10000
+        Period: MONTH
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  HelloWorldApi:
+    Description: API Gateway endpoint URL for Prod stage for Hello World
+      function
+    Value: !Sub "https://${ButlerAgentApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
+  HelloWorldFunction:
+    Description: Hello World Lambda Function ARN
+    Value: !GetAtt HelloWorldFunction.Arn
+  HelloWorldFunctionIamRole:
+    Description: Implicit IAM Role created for Hello World function
+    Value: !GetAtt HelloWorldFunctionRole.Arn
+  ApiKeyId:
+    Description: API Key ID; fetch the value with `aws apigateway get-api-key --include-value`
+    Value: !Ref ApiKey
