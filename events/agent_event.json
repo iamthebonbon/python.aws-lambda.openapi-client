@@ -1,0 +1,10 @@
+{
+  "body": "{\"prompt\": \"What's in my wardrobe, and can you wash anything that's dirty?\"}",
+  "resource": "/agent",
+  "path": "/agent",
+  "httpMethod": "POST",
+  "isBase64Encoded": false,
+  "headers": {
+    "Content-Type": "application/json"
+  }
+}
