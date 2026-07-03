@@ -20,10 +20,11 @@ jobs:
 
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
+      actions: read # Required for Claude to read CI results on PRs
 
     steps:
       - name: Checkout repository
@@ -36,9 +37,18 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          show_full_output: true
+          allowed_bots: claude
+          claude_args: |
+            --allowedTools "Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Skill,Bash(git *),Bash(gh *)"
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-
+          prompt: |
+            Call `/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}`
+            # Instructions
+            - Always clear context before you start from new request
+            # Scenarios
+            1. You are tasked to code review
+            2. Do review according to tasked directives
+            3. Once you are done leave comment in current PR with result of your review
+            4. If you haven't found issues then merge request
