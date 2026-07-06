@@ -106,6 +106,8 @@ def summarize_history(history):
     head, rest = ([history[0]], history[1:]) if has_system else ([], history)
 
     midpoint = len(rest) // 2
+    while midpoint > 0 and rest[midpoint]["role"] == "tool":
+        midpoint -= 1
     old, recent = rest[:midpoint], rest[midpoint:]
     transcript = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in old)
 
