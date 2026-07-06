@@ -77,6 +77,30 @@ def test_lambda_handler_reuses_supplied_history_without_duplicate_system_prompt(
     assert body["history"][3] == {"role": "user", "content": "wash my shirt"}
 
 
+def test_summarize_history_leaves_short_history_untouched():
+    history = [{"role": "system", "content": app.SYSTEM_PROMPT}] + [
+        {"role": "user", "content": f"message {i}"} for i in range(app.HISTORY_LIMIT - 1)
+    ]
+
+    result = app.summarize_history(history)
+
+    assert result == history
+
+
+def test_summarize_history_collapses_oldest_half_when_over_limit():
+    history = [{"role": "system", "content": app.SYSTEM_PROMPT}] + [
+        {"role": "user", "content": f"message {i}"} for i in range(app.HISTORY_LIMIT + 1)
+    ]
+
+    with patch.object(app.client.chat.completions, "create", return_value=_completion(content="a short summary")) as mock_create:
+        result = app.summarize_history(history)
+
+    mock_create.assert_called_once()
+    assert result[0] == {"role": "system", "content": app.SYSTEM_PROMPT}
+    assert result[1] == {"role": "assistant", "content": "[Summary of earlier conversation] a short summary"}
+    assert result[2:] == history[1 + (len(history) - 1) // 2:]
+
+
 def test_wash_item_marks_matching_item_clean():
     tools = app.build_tools()
 
