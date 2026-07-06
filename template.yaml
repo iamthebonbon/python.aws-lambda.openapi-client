@@ -58,10 +58,11 @@ Resources:
             Path: /agent
             Method: post
 
-  # Durable store for the agent's semantic memory (a Chroma collection archived
-  # from /tmp; see agent/app.py). S3 keeps this cheap and serverless: storage is
-  # a fraction of a cent per month at this scale, with no EFS mount or always-on
-  # database to run just to persist a small amount of long-term memory.
+  # Durable store for the agent's semantic memory: each remembered fact is its
+  # own S3 object (text + embedding); see agent/app.py. S3 keeps this cheap and
+  # serverless: storage is a fraction of a cent per month at this scale, with
+  # no EFS mount or always-on database to run just to persist a small amount of
+  # long-term memory.
   MemoryBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -126,5 +127,5 @@ Outputs:
     Description: API Key ID; fetch the value with `aws apigateway get-api-key --include-value`
     Value: !Ref ApiKey
   MemoryBucket:
-    Description: S3 bucket storing the Agent function's semantic memory (Chroma store)
+    Description: S3 bucket storing the Agent function's semantic memory (one object per fact)
     Value: !Ref MemoryBucket
