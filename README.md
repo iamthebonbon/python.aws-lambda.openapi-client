@@ -47,17 +47,16 @@ aws ssm put-parameter \
 ## Semantic memory
 
 `AgentFunction` can save and recall facts across conversations using two tools, `remember_fact` and
-`recall_facts`. [Chroma](https://www.trychroma.com/) has no native S3 backend, so rather than archiving a
-local Chroma database to S3, S3 itself is the memory store: each `remember_fact` call embeds the text and
-writes it straight to the `MemoryBucket` bucket as its own object (`facts/<uuid>.json`, holding the text and
-its embedding). `recall_facts` lists and downloads every fact object, loads them into a throwaway in-memory
-Chroma collection, and runs the similarity search there before discarding it. This was chosen over the
-alternatives for cost and operational simplicity:
+`recall_facts`. S3 itself is the memory store: each `remember_fact` call embeds the text and writes it
+straight to the `MemoryBucket` bucket as its own object (`facts/<uuid>.json`, holding the text and its
+embedding). `recall_facts` lists and downloads every fact object, then ranks them against the query with a
+plain cosine-similarity scan in memory — no vector database involved. This was chosen over the alternatives
+for cost and operational simplicity:
 
 - an EFS mount would keep a shared database always up to date, but adds an always-provisioned network
   filesystem and a VPC requirement, both costing more than S3 at this scale;
-- a long-running Chroma server (EC2/Fargate) reintroduces the always-on compute cost serverless is meant to
-  avoid;
+- a long-running vector database server (EC2/Fargate) reintroduces the always-on compute cost serverless is
+  meant to avoid;
 - a managed vector database (e.g. OpenSearch Serverless, Pinecone) pays off at much larger memory sizes, but
   is unnecessary cost for the small, per-agent memory this project needs today.
 

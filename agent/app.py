@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import logging
 import uuid
@@ -7,7 +8,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 import boto3
-import chromadb
 from openai import OpenAI
 
 SYSTEM_PROMPT = """
@@ -28,11 +28,11 @@ SUMMARY_PROMPT = "Summarize this conversation excerpt in 2-3 sentences, keeping 
 
 # Long-term semantic memory, stored directly in S3: each fact is its own object
 # (text + embedding), so S3 is the memory itself rather than a snapshot of a
-# local database. That sidesteps Chroma's lack of an S3 backend and, unlike
-# archiving a shared sqlite file, makes concurrent writes across containers
-# safe (each write is an independent PutObject, not a read-modify-write of one
-# file). Chroma is only used in memory, per-request, to run the similarity
-# search over whatever facts are fetched from S3.
+# local database. Unlike archiving a shared sqlite file, this makes concurrent
+# writes across containers safe (each write is an independent PutObject, not a
+# read-modify-write of one file). recall_facts loads every fact into memory,
+# per-request, and ranks them with a plain cosine-similarity scan — no vector
+# database needed at this project's memory scale.
 MEMORY_BUCKET = os.getenv("MEMORY_BUCKET")
 MEMORY_PREFIX = os.getenv("MEMORY_PREFIX", "facts")
 
@@ -71,20 +71,23 @@ def _load_facts():
     return facts
 
 
+def _cosine_similarity(a, b):
+    """Cosine similarity between two equal-length embedding vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+
 def recall_facts(query, n_results=3):
-    """Load facts from S3 into a throwaway Chroma collection and return the closest matches to a query."""
+    """Load facts from S3 and return the texts closest to a query by cosine similarity."""
     facts = _load_facts()
     if not facts:
         return {"matches": []}
 
-    collection = chromadb.Client().create_collection(str(uuid.uuid4()))
-    collection.add(
-        ids=[str(i) for i in range(len(facts))],
-        embeddings=[fact["embedding"] for fact in facts],
-        documents=[fact["text"] for fact in facts],
-    )
-    results = collection.query(query_embeddings=[_embed(query)], n_results=min(n_results, len(facts)))
-    return {"matches": results["documents"][0]}
+    query_embedding = _embed(query)
+    ranked = sorted(facts, key=lambda fact: _cosine_similarity(fact["embedding"], query_embedding), reverse=True)
+    return {"matches": [fact["text"] for fact in ranked[:n_results]]}
 
 
 # Seed data for the wardrobe tools. A fresh copy is built for every request

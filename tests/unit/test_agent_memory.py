@@ -73,23 +73,15 @@ def test_recall_facts_short_circuits_when_no_facts_are_stored(monkeypatch):
     assert result == {"matches": []}
 
 
-def test_recall_facts_loads_facts_into_a_throwaway_chroma_collection(monkeypatch):
+def test_recall_facts_ranks_matches_by_cosine_similarity_to_the_query(monkeypatch):
     facts = [
-        {"text": "fact one", "embedding": [0.1, 0.2]},
-        {"text": "fact two", "embedding": [0.3, 0.4]},
+        {"text": "fact one", "embedding": [1.0, 0.0]},  # parallel to query -> similarity 1.0
+        {"text": "fact two", "embedding": [0.0, 1.0]},  # orthogonal to query -> similarity 0.0
+        {"text": "fact three", "embedding": [1.0, 1.0]},  # 45 degrees off -> similarity ~0.707
     ]
     monkeypatch.setattr(app, "_load_facts", MagicMock(return_value=facts))
-    monkeypatch.setattr(app, "_embed", MagicMock(return_value=[0.5, 0.6]))
+    monkeypatch.setattr(app, "_embed", MagicMock(return_value=[1.0, 0.0]))
 
-    fake_collection = MagicMock()
-    fake_collection.query.return_value = {"documents": [["fact one", "fact two"]]}
-    fake_chroma_client = MagicMock(create_collection=MagicMock(return_value=fake_collection))
-    monkeypatch.setattr(app.chromadb, "Client", MagicMock(return_value=fake_chroma_client))
+    result = app.recall_facts("preferences", n_results=2)
 
-    result = app.recall_facts("preferences", n_results=5)
-
-    assert result == {"matches": ["fact one", "fact two"]}
-    _, kwargs = fake_collection.add.call_args
-    assert kwargs["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
-    assert kwargs["documents"] == ["fact one", "fact two"]
-    fake_collection.query.assert_called_once_with(query_embeddings=[[0.5, 0.6]], n_results=2)
+    assert result == {"matches": ["fact one", "fact three"]}
