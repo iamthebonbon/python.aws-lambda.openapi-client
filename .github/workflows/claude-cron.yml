@@ -2,7 +2,7 @@ name: Claude Cron — Auto-pick Issue
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 15,21,3 * * *'
   workflow_dispatch:
 
 jobs:
