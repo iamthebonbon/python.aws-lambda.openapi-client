@@ -101,6 +101,28 @@ def test_summarize_history_collapses_oldest_half_when_over_limit():
     assert result[2:] == history[1 + (len(history) - 1) // 2:]
 
 
+def test_summarize_history_keeps_tool_call_and_result_together():
+    # Constructed so the naive `len(rest) // 2` midpoint lands exactly on the
+    # `tool` message, which would otherwise orphan it from its `assistant`
+    # tool_calls message.
+    history = (
+        [{"role": "system", "content": app.SYSTEM_PROMPT}]
+        + [{"role": "user", "content": f"early {i}"} for i in range(4)]
+        + [
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+        ]
+        + [{"role": "user", "content": f"late {i}"} for i in range(4)]
+    )
+
+    with patch.object(app.client.chat.completions, "create", return_value=_completion(content="a short summary")):
+        result = app.summarize_history(history)
+
+    recent_roles = [m["role"] for m in result[2:]]
+    assert recent_roles[0] != "tool"
+    assert recent_roles[recent_roles.index("tool") - 1] == "assistant"
+
+
 def test_wash_item_marks_matching_item_clean():
     tools = app.build_tools()
 
