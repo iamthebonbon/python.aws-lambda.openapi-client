@@ -13,15 +13,17 @@ on:
 jobs:
   claude:
     if: |
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,9 +40,15 @@ jobs:
           claude_args: |
             --allowedTools "Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Skill,Bash(git *),Bash(gh *),Bash(python *)"
           prompt: |
-            Implement the changes described in this issue: ${{ github.event.issue.title }} - ${{ github.event.issue.body }}
+            Implement the changes described in this issue or comment:
+            Issue/PR title: ${{ github.event.issue.title || github.event.pull_request.title }}
+            Issue body: ${{ github.event.issue.body || '' }}
+            Comment: ${{ github.event.comment.body || github.event.review.body || '' }}
+
             # Instructions
             - Always clear context before you start from new request
             # Scenarios
-            1. You are tasked to implement issue
-            2. Propose changes in new branch and create PR with `closes issue` feature
+            - If triggered from an issue: 
+              - implement it, propose changes in a new branch, create a PR with `closes #${{ github.event.issue.number }}`
+            - If triggered from a PR comment: 
+              - do changes according to comment
