@@ -1,8 +1,6 @@
 import json
 import os
 import logging
-import tarfile
-import tempfile
 import uuid
 
 logger = logging.getLogger()
@@ -10,7 +8,6 @@ logger.setLevel(logging.INFO)
 
 import boto3
 import chromadb
-from botocore.exceptions import ClientError
 from openai import OpenAI
 
 SYSTEM_PROMPT = """
@@ -29,74 +26,64 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 HISTORY_LIMIT = 10
 SUMMARY_PROMPT = "Summarize this conversation excerpt in 2-3 sentences, keeping any facts relevant to future turns."
 
-# Long-term semantic memory: a Chroma collection persisted to S3. Chroma only
-# writes to local disk, so the store lives in /tmp (reused for free across warm
-# invocations of the same container) and is archived to/from S3 so a cold start,
-# or a different concurrent container, can pick up what was last saved.
+# Long-term semantic memory, stored directly in S3: each fact is its own object
+# (text + embedding), so S3 is the memory itself rather than a snapshot of a
+# local database. That sidesteps Chroma's lack of an S3 backend and, unlike
+# archiving a shared sqlite file, makes concurrent writes across containers
+# safe (each write is an independent PutObject, not a read-modify-write of one
+# file). Chroma is only used in memory, per-request, to run the similarity
+# search over whatever facts are fetched from S3.
 MEMORY_BUCKET = os.getenv("MEMORY_BUCKET")
-MEMORY_PREFIX = os.getenv("MEMORY_PREFIX", "")
-MEMORY_LOCAL_DIR = "/tmp/chroma"
-MEMORY_COLLECTION_NAME = "agent-memory"
-MEMORY_ARCHIVE_KEY = f"{MEMORY_PREFIX.rstrip('/')}/memory.tar.gz" if MEMORY_PREFIX else "memory.tar.gz"
+MEMORY_PREFIX = os.getenv("MEMORY_PREFIX", "facts")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _s3 = boto3.client("s3")
-_memory_collection = None  # cached across warm invocations, alongside the /tmp files it wraps
-
-
-def _download_memory_snapshot():
-    """Restore the persisted Chroma store from S3 into /tmp, once per cold start."""
-    if os.path.isdir(MEMORY_LOCAL_DIR):
-        return  # container is warm; the on-disk store is already there
-
-    os.makedirs(MEMORY_LOCAL_DIR, exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
-        try:
-            _s3.download_file(MEMORY_BUCKET, MEMORY_ARCHIVE_KEY, archive.name)
-        except ClientError as e:
-            if e.response["Error"]["Code"] not in ("404", "NoSuchKey"):
-                raise
-            return  # nothing saved yet; start with an empty collection
-        with tarfile.open(archive.name) as tar:
-            tar.extractall(MEMORY_LOCAL_DIR)
-
-
-def _upload_memory_snapshot():
-    """Archive the current Chroma store back to S3 so it survives the next cold start."""
-    with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
-        with tarfile.open(archive.name, "w:gz") as tar:
-            tar.add(MEMORY_LOCAL_DIR, arcname=".")
-        _s3.upload_file(archive.name, MEMORY_BUCKET, MEMORY_ARCHIVE_KEY)
-
-
-def get_memory_collection():
-    """Return the Chroma collection backing semantic memory, restoring it from S3 on first use."""
-    global _memory_collection
-    if _memory_collection is None:
-        _download_memory_snapshot()
-        chroma_client = chromadb.PersistentClient(path=MEMORY_LOCAL_DIR)
-        _memory_collection = chroma_client.get_or_create_collection(MEMORY_COLLECTION_NAME)
-    return _memory_collection
 
 
 def _embed(text):
     return client.embeddings.create(model=EMBEDDING_MODEL, input=[text]).data[0].embedding
 
 
+def _fact_key(fact_id):
+    return f"{MEMORY_PREFIX.rstrip('/')}/{fact_id}.json"
+
+
 def remember_fact(text):
-    """Store a fact in semantic memory and persist the updated store to S3."""
-    collection = get_memory_collection()
-    collection.add(ids=[str(uuid.uuid4())], embeddings=[_embed(text)], documents=[text])
-    _upload_memory_snapshot()
+    """Embed a fact and write it straight to S3 as its own object."""
+    fact = {"text": text, "embedding": _embed(text)}
+    _s3.put_object(
+        Bucket=MEMORY_BUCKET,
+        Key=_fact_key(str(uuid.uuid4())),
+        Body=json.dumps(fact).encode("utf-8"),
+        ContentType="application/json",
+    )
     return {"stored": text}
 
 
+def _load_facts():
+    """Fetch every fact object from S3. Memory is small at this project's scale, so a full scan is cheap."""
+    facts = []
+    paginator = _s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=MEMORY_BUCKET, Prefix=f"{MEMORY_PREFIX.rstrip('/')}/"):
+        for obj in page.get("Contents", []):
+            body = _s3.get_object(Bucket=MEMORY_BUCKET, Key=obj["Key"])["Body"].read()
+            facts.append(json.loads(body))
+    return facts
+
+
 def recall_facts(query, n_results=3):
-    """Return the remembered facts most semantically similar to a query."""
-    collection = get_memory_collection()
-    if collection.count() == 0:
+    """Load facts from S3 into a throwaway Chroma collection and return the closest matches to a query."""
+    facts = _load_facts()
+    if not facts:
         return {"matches": []}
-    results = collection.query(query_embeddings=[_embed(query)], n_results=min(n_results, collection.count()))
+
+    collection = chromadb.Client().create_collection(str(uuid.uuid4()))
+    collection.add(
+        ids=[str(i) for i in range(len(facts))],
+        embeddings=[fact["embedding"] for fact in facts],
+        documents=[fact["text"] for fact in facts],
+    )
+    results = collection.query(query_embeddings=[_embed(query)], n_results=min(n_results, len(facts)))
     return {"matches": results["documents"][0]}
 
 

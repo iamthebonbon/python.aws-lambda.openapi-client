@@ -47,22 +47,26 @@ aws ssm put-parameter \
 ## Semantic memory
 
 `AgentFunction` can save and recall facts across conversations using two tools, `remember_fact` and
-`recall_facts`, backed by a [Chroma](https://www.trychroma.com/) collection. Chroma only persists to local
-disk, so the collection lives in the function's `/tmp` directory (reused for free across warm invocations
-of the same container) and is archived to the `MemoryBucket` S3 bucket after every write, and restored from
-there on cold start. This was chosen over the alternatives for cost and operational simplicity:
+`recall_facts`. [Chroma](https://www.trychroma.com/) has no native S3 backend, so rather than archiving a
+local Chroma database to S3, S3 itself is the memory store: each `remember_fact` call embeds the text and
+writes it straight to the `MemoryBucket` bucket as its own object (`facts/<uuid>.json`, holding the text and
+its embedding). `recall_facts` lists and downloads every fact object, loads them into a throwaway in-memory
+Chroma collection, and runs the similarity search there before discarding it. This was chosen over the
+alternatives for cost and operational simplicity:
 
-- an EFS mount would keep the store shared and always up to date, but adds an always-provisioned network
+- an EFS mount would keep a shared database always up to date, but adds an always-provisioned network
   filesystem and a VPC requirement, both costing more than S3 at this scale;
 - a long-running Chroma server (EC2/Fargate) reintroduces the always-on compute cost serverless is meant to
   avoid;
 - a managed vector database (e.g. OpenSearch Serverless, Pinecone) pays off at much larger memory sizes, but
   is unnecessary cost for the small, per-agent memory this project needs today.
 
-The tradeoff: the sqlite-backed Chroma store is not safe for concurrent writers, so this approach assumes
-low write concurrency. If memory grows large or writes become highly concurrent, revisit with a managed
-vector database instead. `MemoryBucket` is created and wired up automatically by `template.yaml`; no manual
-setup is required beyond deploying the stack.
+One-object-per-fact also sidesteps the concurrency problem a shared sqlite file would have: each
+`remember_fact` call is an independent S3 `PutObject`, not a read-modify-write of one file, so concurrent
+writers across separate containers are safe. The tradeoff is `recall_facts` cost: it re-downloads every fact
+on every call, which is cheap at this project's scale but would need pagination/caching if memory grows
+large. `MemoryBucket` is created and wired up automatically by `template.yaml`; no manual setup is required
+beyond deploying the stack.
 
 To build and deploy your application for the first time, run the following in your shell:
 
