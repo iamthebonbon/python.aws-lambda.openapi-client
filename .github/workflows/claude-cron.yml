@@ -1,8 +1,8 @@
-name: Claude Cron — Auto-pick Issue
+name: Claude Night Shift
 
 on:
   schedule:
-    - cron: '0 15,21,3 * * *'
+    - cron: '0 15,18,21,0,3 * * *'
   workflow_dispatch:
 
 jobs:
