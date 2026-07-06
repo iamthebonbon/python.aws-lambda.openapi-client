@@ -12,48 +12,54 @@ Globals:
       LogFormat: JSON
 Resources:
   OpenApiClientApi:
-    Type: AWS::ApiGateway::RestApi # Plain RestApi (not AWS::Serverless::Api): its own Deployment/Stage
-    Properties:                    # are hand-managed below so nested-stack routes (see MainFunctionStack)
-      Name: openapi-client-api     # are included; AWS::Serverless::Api can't be told to skip its
-                                    # same-template-only implicit Deployment/Stage.
-
-  MainFunctionStack:
-    Type: AWS::Serverless::Application # More info: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessapplication
-    Properties:
-      Location: templates/main.yaml
-      Parameters:
-        RestApiId: !Ref OpenApiClientApi
-
-  AgentFunctionStack:
-    Type: AWS::Serverless::Application
-    Properties:
-      Location: templates/agent.yaml
-      Parameters:
-        RestApiId: !Ref OpenApiClientApi
-
-  # Explicit Deployment/Stage: OpenApiClientApi is a plain RestApi (see above) so nothing manages
-  # these automatically. DependsOn both nested stacks; each stack's completion is atomic and
-  # guarantees its route's method resource exists, so a redeploy always covers both routes.
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-    - MainFunctionStack
-    - AgentFunctionStack
-    Properties:
-      RestApiId: !Ref OpenApiClientApi
-      Description: Deployment covering MainFunctionStack's and AgentFunctionStack's routes
-
-  ApiStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      RestApiId: !Ref OpenApiClientApi
-      DeploymentId: !Ref ApiDeployment
+    Type: AWS::Serverless::Api # SAM-managed API: since both routes now live in this same template, SAM's
+    Properties:                # transform can see them and generate the Deployment/Stage itself.
+      Name: openapi-client-api
       StageName: Prod
+      Auth:
+        ApiKeyRequired: true # Applies to every route below; no need to repeat it per function.
 
+  MainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures:
+      - x86_64
+      Events:
+        Main:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpenApiClientApi
+            Path: /main
+            Method: get
+
+  AgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: agent/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Architectures:
+      - x86_64
+      Environment:
+        Variables:
+          OPENAI_API_KEY: "{{resolve:ssm:/openai-client/openai-api-key}}"
+      Events:
+        Agent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpenApiClientApi
+            Path: /agent
+            Method: post
+
+  # DependsOn the SAM-generated Prod stage (logical id: "<Api logical id><StageName>Stage") so the
+  # API key/usage plan attach only once the stage they reference actually exists.
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
     DependsOn:
-    - ApiStage
+    - OpenApiClientApiProdStage
     Properties:
       Name: openapi-client-api-key
       Description: API key required to call the openapi-client API
@@ -65,7 +71,7 @@ Resources:
   UsagePlan:
     Type: AWS::ApiGateway::UsagePlan
     DependsOn:
-    - ApiStage
+    - OpenApiClientApiProdStage
     Properties:
       UsagePlanName: openapi-client-usage-plan
       Description: Throttling and quota applied to callers of the openapi-client API key
@@ -93,13 +99,13 @@ Outputs:
     Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/main/"
   MainFunction:
     Description: Main Lambda Function ARN
-    Value: !GetAtt MainFunctionStack.Outputs.MainFunctionArn
+    Value: !GetAtt MainFunction.Arn
   AgentApi:
     Description: API Gateway endpoint URL for Prod stage for the Agent function
     Value: !Sub "https://${OpenApiClientApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/agent/"
   AgentFunction:
     Description: Agent Lambda Function ARN
-    Value: !GetAtt AgentFunctionStack.Outputs.AgentFunctionArn
+    Value: !GetAtt AgentFunction.Arn
   ApiKeyId:
     Description: API Key ID; fetch the value with `aws apigateway get-api-key --include-value`
     Value: !Ref ApiKey
