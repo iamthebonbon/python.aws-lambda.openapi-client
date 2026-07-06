@@ -46,6 +46,10 @@ Resources:
       Environment:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm:/openai-client/openai-api-key}}"
+          MEMORY_BUCKET: !Ref MemoryBucket
+      Policies:
+      - S3CrudPolicy:
+          BucketName: !Ref MemoryBucket
       Events:
         Agent:
           Type: Api
@@ -53,6 +57,18 @@ Resources:
             RestApiId: !Ref OpenApiClientApi
             Path: /agent
             Method: post
+
+  # Durable store for the agent's semantic memory (a Chroma collection archived
+  # from /tmp; see agent/app.py). S3 keeps this cheap and serverless: storage is
+  # a fraction of a cent per month at this scale, with no EFS mount or always-on
+  # database to run just to persist a small amount of long-term memory.
+  MemoryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
 
   # DependsOn the SAM-generated Prod stage (logical id: "<Api logical id><StageName>Stage") so the
   # API key/usage plan attach only once the stage they reference actually exists.
@@ -109,3 +125,6 @@ Outputs:
   ApiKeyId:
     Description: API Key ID; fetch the value with `aws apigateway get-api-key --include-value`
     Value: !Ref ApiKey
+  MemoryBucket:
+    Description: S3 bucket storing the Agent function's semantic memory (Chroma store)
+    Value: !Ref MemoryBucket

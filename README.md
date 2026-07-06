@@ -3,7 +3,7 @@
 This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI. It includes the following files and folders.
 
 - app - Code for the Main Lambda function (`GET /main`).
-- agent - Code for the Agent Lambda function (`POST /agent`).
+- agent - Code for the Agent Lambda function (`POST /agent`), including its `remember_fact`/`recall_facts` semantic memory tools (see [Semantic memory](#semantic-memory) below).
 - events - Invocation events that you can use to invoke the function.
 - tests - Unit tests for the application code. 
 - template.yaml - The SAM template defining the API Gateway REST API and both Lambda functions.
@@ -43,6 +43,26 @@ aws ssm put-parameter \
   --type String \
   --value "<your-openai-api-key>"
 ```
+
+## Semantic memory
+
+`AgentFunction` can save and recall facts across conversations using two tools, `remember_fact` and
+`recall_facts`, backed by a [Chroma](https://www.trychroma.com/) collection. Chroma only persists to local
+disk, so the collection lives in the function's `/tmp` directory (reused for free across warm invocations
+of the same container) and is archived to the `MemoryBucket` S3 bucket after every write, and restored from
+there on cold start. This was chosen over the alternatives for cost and operational simplicity:
+
+- an EFS mount would keep the store shared and always up to date, but adds an always-provisioned network
+  filesystem and a VPC requirement, both costing more than S3 at this scale;
+- a long-running Chroma server (EC2/Fargate) reintroduces the always-on compute cost serverless is meant to
+  avoid;
+- a managed vector database (e.g. OpenSearch Serverless, Pinecone) pays off at much larger memory sizes, but
+  is unnecessary cost for the small, per-agent memory this project needs today.
+
+The tradeoff: the sqlite-backed Chroma store is not safe for concurrent writers, so this approach assumes
+low write concurrency. If memory grows large or writes become highly concurrent, revisit with a managed
+vector database instead. `MemoryBucket` is created and wired up automatically by `template.yaml`; no manual
+setup is required beyond deploying the stack.
 
 To build and deploy your application for the first time, run the following in your shell:
 
