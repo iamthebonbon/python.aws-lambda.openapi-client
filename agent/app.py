@@ -17,6 +17,9 @@ If you see dirty cloth then pass it to wash.
 MAX_ITERATIONS = 5
 MODEL_NAME = "gpt-4o-mini"
 
+HISTORY_LIMIT = 10
+SUMMARY_PROMPT = "Summarize this conversation excerpt in 2-3 sentences, keeping any facts relevant to future turns."
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Seed data for the wardrobe tools. A fresh copy is built for every request
@@ -94,6 +97,30 @@ def call_tool(tools, tool_call):
     return function(**arguments)
 
 
+def summarize_history(history):
+    """Collapse the oldest half of a long history into one summary message, keeping the rest intact."""
+    if len(history) <= HISTORY_LIMIT:
+        return history
+
+    has_system = history[0]["role"] == "system"
+    head, rest = ([history[0]], history[1:]) if has_system else ([], history)
+
+    midpoint = len(rest) // 2
+    old, recent = rest[:midpoint], rest[midpoint:]
+    transcript = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in old)
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": SUMMARY_PROMPT},
+            {"role": "user", "content": transcript},
+        ],
+    )
+    summary = {"role": "assistant", "content": f"[Summary of earlier conversation] {response.choices[0].message.content}"}
+
+    return head + [summary] + recent
+
+
 def run_agent(messages, tools):
     """Run the tool-calling loop for up to MAX_ITERATIONS, returning the updated messages."""
     for _ in range(MAX_ITERATIONS):
@@ -127,6 +154,7 @@ def lambda_handler(event, context):
         prompt = body.get("prompt", "")
         history = body.get("history") or [{"role": "system", "content": SYSTEM_PROMPT}]
 
+        history = summarize_history(history)
         history.append({"role": "user", "content": prompt})
         history = run_agent(history, build_tools())
 
