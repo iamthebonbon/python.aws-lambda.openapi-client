@@ -1,4 +1,4 @@
-import json
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,59 +8,70 @@ from agent import app
 
 @pytest.fixture(autouse=True)
 def isolate_memory_state(monkeypatch):
-    """Point memory at a scratch bucket/prefix so tests don't depend on real env vars."""
-    monkeypatch.setattr(app, "MEMORY_BUCKET", "test-bucket")
-    monkeypatch.setattr(app, "MEMORY_PREFIX", "facts")
+    """Point memory at a scratch table so tests don't depend on real env vars."""
+    monkeypatch.setattr(app, "MEMORY_TABLE", "test-table")
 
 
-def test_fact_key_is_namespaced_under_the_prefix():
-    assert app._fact_key("abc") == "facts/abc.json"
+def _mock_table(monkeypatch):
+    mock_table = MagicMock()
+    mock_dynamodb = MagicMock()
+    mock_dynamodb.Table.return_value = mock_table
+    monkeypatch.setattr(app, "_dynamodb", mock_dynamodb)
+    return mock_table
 
 
-def test_remember_fact_embeds_and_puts_a_standalone_object(monkeypatch):
+def test_remember_fact_embeds_and_puts_a_standalone_item(monkeypatch):
     monkeypatch.setattr(app, "_embed", MagicMock(return_value=[0.1, 0.2]))
-    mock_s3 = MagicMock()
-    monkeypatch.setattr(app, "_s3", mock_s3)
+    mock_table = _mock_table(monkeypatch)
 
     result = app.remember_fact("the user prefers cold showers")
 
     assert result == {"stored": "the user prefers cold showers"}
-    _, kwargs = mock_s3.put_object.call_args
-    assert kwargs["Bucket"] == "test-bucket"
-    assert kwargs["Key"].startswith("facts/") and kwargs["Key"].endswith(".json")
-    assert json.loads(kwargs["Body"]) == {"text": "the user prefers cold showers", "embedding": [0.1, 0.2]}
+    _, kwargs = mock_table.put_item.call_args
+    item = kwargs["Item"]
+    assert item["text"] == "the user prefers cold showers"
+    assert item["embedding"] == [Decimal("0.1"), Decimal("0.2")]
+    assert isinstance(item["fact_id"], str) and item["fact_id"]
 
 
-def _paginator_with_pages(pages):
-    paginator = MagicMock()
-    paginator.paginate.return_value = pages
-    return paginator
-
-
-def test_load_facts_downloads_every_object_under_the_prefix(monkeypatch):
-    mock_s3 = MagicMock()
-    mock_s3.get_paginator.return_value = _paginator_with_pages(
-        [{"Contents": [{"Key": "facts/a.json"}, {"Key": "facts/b.json"}]}]
-    )
-    bodies = {
-        "facts/a.json": {"text": "fact a", "embedding": [0.1]},
-        "facts/b.json": {"text": "fact b", "embedding": [0.2]},
+def test_load_facts_scans_every_item_and_converts_embeddings_to_float(monkeypatch):
+    mock_table = _mock_table(monkeypatch)
+    mock_table.scan.return_value = {
+        "Items": [
+            {"fact_id": "a", "text": "fact a", "embedding": [Decimal("0.1")]},
+            {"fact_id": "b", "text": "fact b", "embedding": [Decimal("0.2")]},
+        ]
     }
-    mock_s3.get_object.side_effect = lambda Bucket, Key: {
-        "Body": MagicMock(read=MagicMock(return_value=json.dumps(bodies[Key]).encode("utf-8")))
-    }
-    monkeypatch.setattr(app, "_s3", mock_s3)
 
     facts = app._load_facts()
 
-    mock_s3.get_paginator.assert_called_once_with("list_objects_v2")
-    assert facts == [bodies["facts/a.json"], bodies["facts/b.json"]]
+    mock_table.scan.assert_called_once_with()
+    assert facts == [
+        {"text": "fact a", "embedding": [0.1]},
+        {"text": "fact b", "embedding": [0.2]},
+    ]
+
+
+def test_load_facts_follows_pagination(monkeypatch):
+    mock_table = _mock_table(monkeypatch)
+    mock_table.scan.side_effect = [
+        {"Items": [{"fact_id": "a", "text": "fact a", "embedding": [Decimal("0.1")]}], "LastEvaluatedKey": {"fact_id": "a"}},
+        {"Items": [{"fact_id": "b", "text": "fact b", "embedding": [Decimal("0.2")]}]},
+    ]
+
+    facts = app._load_facts()
+
+    assert mock_table.scan.call_count == 2
+    mock_table.scan.assert_any_call(ExclusiveStartKey={"fact_id": "a"})
+    assert facts == [
+        {"text": "fact a", "embedding": [0.1]},
+        {"text": "fact b", "embedding": [0.2]},
+    ]
 
 
 def test_load_facts_returns_empty_list_when_nothing_stored(monkeypatch):
-    mock_s3 = MagicMock()
-    mock_s3.get_paginator.return_value = _paginator_with_pages([{"Contents": []}])
-    monkeypatch.setattr(app, "_s3", mock_s3)
+    mock_table = _mock_table(monkeypatch)
+    mock_table.scan.return_value = {"Items": []}
 
     assert app._load_facts() == []
 
