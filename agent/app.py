@@ -36,6 +36,12 @@ SUMMARY_PROMPT = "Summarize this conversation excerpt in 2-3 sentences, keeping 
 # attribute to avoid float/Decimal conversion.
 MEMORY_TABLE = os.getenv("MEMORY_TABLE")
 
+# Conversation persistence: one DynamoDB item per conversation, keyed by
+# conversation_id, holding the full message history as a JSON blob. A request
+# without an id starts a new conversation and returns its id; a request whose
+# path carries an id resumes that conversation by loading its history.
+CONVERSATION_TABLE = os.getenv("CONVERSATION_TABLE")
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _dynamodb = boto3.client("dynamodb")
 
@@ -85,6 +91,24 @@ def recall_facts(query, n_results=3):
     query_embedding = _embed(query)
     ranked = sorted(facts, key=lambda fact: _cosine_similarity(fact["embedding"], query_embedding), reverse=True)
     return {"matches": [fact["text"] for fact in ranked[:n_results]]}
+
+
+def _load_conversation(conversation_id):
+    """Load a conversation's history by id, or None if it doesn't exist."""
+    response = _dynamodb.get_item(TableName=CONVERSATION_TABLE, Key={"conversation_id": {"S": conversation_id}})
+    item = response.get("Item")
+    return json.loads(item["history"]["S"]) if item else None
+
+
+def _save_conversation(conversation_id, history):
+    """Overwrite the conversation's single item with its full, current history."""
+    _dynamodb.put_item(
+        TableName=CONVERSATION_TABLE,
+        Item={
+            "conversation_id": {"S": conversation_id},
+            "history": {"S": json.dumps(history)},
+        },
+    )
 
 
 # Seed data for the wardrobe tools. A fresh copy is built for every request
@@ -239,24 +263,38 @@ def run_agent(messages, tools):
 
 
 def lambda_handler(event, context):
-    """Run the agent for a single request.
+    """Run the agent for a single request, persisting the conversation in DynamoDB.
 
-    Expects a JSON body of ``{"prompt": str, "history": list | None}``. History
-    is passed back in the response so the caller can resend it on the next
-    request; nothing is persisted between invocations.
+    Expects a JSON body of ``{"prompt": str}``. A request with no
+    ``conversationId`` path parameter starts a new conversation and returns
+    its id; a request whose path carries a ``conversationId`` resumes that
+    conversation by loading its history from DynamoDB. Either way, the full
+    updated history is written back as that conversation's single item.
     """
     try:
         body = json.loads(event.get("body") or "{}")
         prompt = body.get("prompt", "")
-        history = body.get("history") or [{"role": "system", "content": SYSTEM_PROMPT}]
+        conversation_id = (event.get("pathParameters") or {}).get("conversationId")
+
+        if conversation_id:
+            history = _load_conversation(conversation_id)
+            if history is None:
+                return {
+                    "statusCode": 404,
+                    "body": json.dumps({"error": f"conversation {conversation_id} not found"}),
+                }
+        else:
+            conversation_id = str(uuid.uuid4())
+            history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         history = summarize_history(history)
         history.append({"role": "user", "content": prompt})
         history = run_agent(history, build_tools())
+        _save_conversation(conversation_id, history)
 
         result = {
             "statusCode": 200,
-            "body": json.dumps({"reply": history[-1]["content"], "history": history}),
+            "body": json.dumps({"reply": history[-1]["content"], "conversation_id": conversation_id, "history": history}),
         }
         logger.info("Returning: %s", result)
         return result

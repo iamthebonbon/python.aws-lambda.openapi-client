@@ -47,15 +47,24 @@ Resources:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm:/openai-client/openai-api-key}}"
           MEMORY_TABLE: !Ref MemoryTable
+          CONVERSATION_TABLE: !Ref ConversationTable
       Policies:
       - DynamoDBCrudPolicy:
           TableName: !Ref MemoryTable
+      - DynamoDBCrudPolicy:
+          TableName: !Ref ConversationTable
       Events:
         Agent:
           Type: Api
           Properties:
             RestApiId: !Ref OpenApiClientApi
             Path: /agent
+            Method: post
+        AgentWithConversation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpenApiClientApi
+            Path: /agent/{conversationId}
             Method: post
 
   MemoryTable:
@@ -67,6 +76,21 @@ Resources:
         AttributeType: S
       KeySchema:
       - AttributeName: fact_id
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      OnDemandThroughput:
+        MaxReadRequestUnits: 100
+        MaxWriteRequestUnits: 50
+
+  ConversationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: openapi-client-conversation-db
+      AttributeDefinitions:
+      - AttributeName: conversation_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: conversation_id
         KeyType: HASH
       BillingMode: PAY_PER_REQUEST
       OnDemandThroughput:
@@ -131,3 +155,6 @@ Outputs:
   MemoryTable:
     Description: DynamoDB table storing the Agent function's semantic memory (one item per fact)
     Value: !Ref MemoryTable
+  ConversationTable:
+    Description: DynamoDB table storing conversation history (one item per conversation)
+    Value: !Ref ConversationTable
