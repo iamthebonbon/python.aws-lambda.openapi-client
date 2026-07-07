@@ -58,24 +58,17 @@ Resources:
             Path: /agent
             Method: post
 
-  # Durable store for the agent's semantic memory: each remembered fact is its
-  # own DynamoDB item (text + embedding); see agent/app.py. Provisioned
-  # throughput is capped at 25 RCU / 25 WCU so this stays within the AWS free
-  # tier at this project's scale.
   MemoryTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: openapi-client-agent-memory
+      TableName: openapi-client-agent-db
       AttributeDefinitions:
       - AttributeName: fact_id
         AttributeType: S
       KeySchema:
       - AttributeName: fact_id
         KeyType: HASH
-      BillingMode: PROVISIONED
-      ProvisionedThroughput:
-        ReadCapacityUnits: 25
-        WriteCapacityUnits: 25
+      BillingMode: PAY_PER_REQUEST
 
   # DependsOn the SAM-generated Prod stage (logical id: "<Api logical id><StageName>Stage") so the
   # API key/usage plan attach only once the stage they reference actually exists.
