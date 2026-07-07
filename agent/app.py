@@ -26,48 +26,45 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 HISTORY_LIMIT = 10
 SUMMARY_PROMPT = "Summarize this conversation excerpt in 2-3 sentences, keeping any facts relevant to future turns."
 
-# Long-term semantic memory, stored directly in S3: each fact is its own object
-# (text + embedding), so S3 is the memory itself rather than a snapshot of a
-# local database. Unlike archiving a shared sqlite file, this makes concurrent
-# writes across containers safe (each write is an independent PutObject, not a
-# read-modify-write of one file). recall_facts loads every fact into memory,
-# per-request, and ranks them with a plain cosine-similarity scan — no vector
-# database needed at this project's memory scale.
-MEMORY_BUCKET = os.getenv("MEMORY_BUCKET")
-MEMORY_PREFIX = os.getenv("MEMORY_PREFIX", "facts")
+# Long-term semantic memory, stored directly in DynamoDB: each fact is its own
+# item (text + embedding), so the table is the memory itself rather than a
+# snapshot of a local database. This makes concurrent writes across containers
+# safe (each write is an independent PutItem, not a read-modify-write of one
+# file). recall_facts loads every fact into memory, per-request, and ranks
+# them with a plain cosine-similarity scan — no vector database needed at
+# this project's memory scale. The embedding is stored as a JSON string
+# attribute to avoid float/Decimal conversion.
+MEMORY_TABLE = os.getenv("MEMORY_TABLE")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-_s3 = boto3.client("s3")
+_dynamodb = boto3.client("dynamodb")
 
 
 def _embed(text):
     return client.embeddings.create(model=EMBEDDING_MODEL, input=[text]).data[0].embedding
 
 
-def _fact_key(fact_id):
-    return f"{MEMORY_PREFIX.rstrip('/')}/{fact_id}.json"
-
-
 def remember_fact(text):
-    """Embed a fact and write it straight to S3 as its own object."""
-    fact = {"text": text, "embedding": _embed(text)}
-    _s3.put_object(
-        Bucket=MEMORY_BUCKET,
-        Key=_fact_key(str(uuid.uuid4())),
-        Body=json.dumps(fact).encode("utf-8"),
-        ContentType="application/json",
+    """Embed a fact and write it straight to DynamoDB as its own item."""
+    embedding = _embed(text)
+    _dynamodb.put_item(
+        TableName=MEMORY_TABLE,
+        Item={
+            "fact_id": {"S": str(uuid.uuid4())},
+            "text": {"S": text},
+            "embedding": {"S": json.dumps(embedding)},
+        },
     )
     return {"stored": text}
 
 
 def _load_facts():
-    """Fetch every fact object from S3. Memory is small at this project's scale, so a full scan is cheap."""
+    """Fetch every fact item from DynamoDB. Memory is small at this project's scale, so a full scan is cheap."""
     facts = []
-    paginator = _s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=MEMORY_BUCKET, Prefix=f"{MEMORY_PREFIX.rstrip('/')}/"):
-        for obj in page.get("Contents", []):
-            body = _s3.get_object(Bucket=MEMORY_BUCKET, Key=obj["Key"])["Body"].read()
-            facts.append(json.loads(body))
+    paginator = _dynamodb.get_paginator("scan")
+    for page in paginator.paginate(TableName=MEMORY_TABLE):
+        for item in page.get("Items", []):
+            facts.append({"text": item["text"]["S"], "embedding": json.loads(item["embedding"]["S"])})
     return facts
 
 
