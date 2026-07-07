@@ -47,25 +47,25 @@ aws ssm put-parameter \
 ## Semantic memory
 
 `AgentFunction` can save and recall facts across conversations using two tools, `remember_fact` and
-`recall_facts`. S3 itself is the memory store: each `remember_fact` call embeds the text and writes it
-straight to the `MemoryBucket` bucket as its own object (`facts/<uuid>.json`, holding the text and its
-embedding). `recall_facts` lists and downloads every fact object, then ranks them against the query with a
-plain cosine-similarity scan in memory — no vector database involved. This was chosen over the alternatives
-for cost and operational simplicity:
+`recall_facts`. DynamoDB itself is the memory store: each `remember_fact` call embeds the text and writes it
+straight to the `MemoryTable` table as its own item (partition key `fact_id`, holding the text and its
+embedding as a JSON-encoded string). `recall_facts` scans every fact item, then ranks them against the query
+with a plain cosine-similarity scan in memory — no vector database involved. This was chosen over the
+alternatives for cost and operational simplicity:
 
 - an EFS mount would keep a shared database always up to date, but adds an always-provisioned network
-  filesystem and a VPC requirement, both costing more than S3 at this scale;
+  filesystem and a VPC requirement, both costing more than DynamoDB at this scale;
 - a long-running vector database server (EC2/Fargate) reintroduces the always-on compute cost serverless is
   meant to avoid;
 - a managed vector database (e.g. OpenSearch Serverless, Pinecone) pays off at much larger memory sizes, but
   is unnecessary cost for the small, per-agent memory this project needs today.
 
-One-object-per-fact also sidesteps the concurrency problem a shared sqlite file would have: each
-`remember_fact` call is an independent S3 `PutObject`, not a read-modify-write of one file, so concurrent
-writers across separate containers are safe. The tradeoff is `recall_facts` cost: it re-downloads every fact
+One-item-per-fact also sidesteps the concurrency problem a shared sqlite file would have: each
+`remember_fact` call is an independent DynamoDB `PutItem`, not a read-modify-write of one file, so concurrent
+writers across separate containers are safe. The tradeoff is `recall_facts` cost: it re-scans every fact
 on every call, which is cheap at this project's scale but would need pagination/caching if memory grows
-large. `MemoryBucket` is created and wired up automatically by `template.yaml`; no manual setup is required
-beyond deploying the stack.
+large. `MemoryTable` is provisioned with 25 RCU / 25 WCU, fitting inside the AWS free tier, and is created and
+wired up automatically by `template.yaml`; no manual setup is required beyond deploying the stack.
 
 To build and deploy your application for the first time, run the following in your shell:
 

@@ -46,10 +46,10 @@ Resources:
       Environment:
         Variables:
           OPENAI_API_KEY: "{{resolve:ssm:/openai-client/openai-api-key}}"
-          MEMORY_BUCKET: !Ref MemoryBucket
+          MEMORY_TABLE: !Ref MemoryTable
       Policies:
-      - S3CrudPolicy:
-          BucketName: !Ref MemoryBucket
+      - DynamoDBCrudPolicy:
+          TableName: !Ref MemoryTable
       Events:
         Agent:
           Type: Api
@@ -59,17 +59,23 @@ Resources:
             Method: post
 
   # Durable store for the agent's semantic memory: each remembered fact is its
-  # own S3 object (text + embedding); see agent/app.py. S3 keeps this cheap and
-  # serverless: storage is a fraction of a cent per month at this scale, with
-  # no EFS mount or always-on database to run just to persist a small amount of
-  # long-term memory.
-  MemoryBucket:
-    Type: AWS::S3::Bucket
+  # own DynamoDB item (text + embedding); see agent/app.py. Provisioned
+  # throughput is capped at 25 RCU / 25 WCU so this stays within the AWS free
+  # tier at this project's scale.
+  MemoryTable:
+    Type: AWS::DynamoDB::Table
     Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-        - ServerSideEncryptionByDefault:
-            SSEAlgorithm: AES256
+      TableName: openapi-client-agent-memory
+      AttributeDefinitions:
+      - AttributeName: fact_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: fact_id
+        KeyType: HASH
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 25
+        WriteCapacityUnits: 25
 
   # DependsOn the SAM-generated Prod stage (logical id: "<Api logical id><StageName>Stage") so the
   # API key/usage plan attach only once the stage they reference actually exists.
@@ -126,6 +132,6 @@ Outputs:
   ApiKeyId:
     Description: API Key ID; fetch the value with `aws apigateway get-api-key --include-value`
     Value: !Ref ApiKey
-  MemoryBucket:
-    Description: S3 bucket storing the Agent function's semantic memory (one object per fact)
-    Value: !Ref MemoryBucket
+  MemoryTable:
+    Description: DynamoDB table storing the Agent function's semantic memory (one item per fact)
+    Value: !Ref MemoryTable
