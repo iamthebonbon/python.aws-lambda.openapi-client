@@ -1,8 +1,16 @@
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from agent import app
+
+
+@pytest.fixture(autouse=True)
+def isolate_conversation_state(monkeypatch):
+    """Stub out DynamoDB conversation persistence so handler tests don't need real AWS calls."""
+    monkeypatch.setattr(app, "_save_conversation", MagicMock())
 
 
 def _completion(content=None, tool_calls=None):
@@ -33,6 +41,16 @@ def test_lambda_handler_replies_without_tool_calls():
     mock_create.assert_called_once()
 
 
+def test_lambda_handler_starts_new_conversation_and_returns_its_id():
+    with patch.object(app.client.chat.completions, "create", return_value=_completion(content="Hi there!")):
+        event = {"body": json.dumps({"prompt": "hello"})}
+        response = app.lambda_handler(event, None)
+
+    body = json.loads(response["body"])
+    assert body["conversation_id"]
+    app._save_conversation.assert_called_once_with(body["conversation_id"], body["history"])
+
+
 def test_lambda_handler_executes_tool_call_before_replying():
     tool_call = _tool_call("call_1", "get_wardrobe", {})
     responses = [_completion(tool_calls=[tool_call]), _completion(content="Your rain jacket is clean.")]
@@ -60,21 +78,35 @@ def test_lambda_handler_stops_after_max_iterations():
     assert mock_create.call_count == app.MAX_ITERATIONS
 
 
-def test_lambda_handler_reuses_supplied_history_without_duplicate_system_prompt():
+def test_lambda_handler_loads_conversation_by_path_id_without_duplicate_system_prompt(monkeypatch):
     history = [
         {"role": "system", "content": app.SYSTEM_PROMPT},
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello!"},
     ]
+    monkeypatch.setattr(app, "_load_conversation", MagicMock(return_value=history))
 
     with patch.object(app.client.chat.completions, "create", return_value=_completion(content="sure, washing it")):
-        event = {"body": json.dumps({"prompt": "wash my shirt", "history": history})}
+        event = {"body": json.dumps({"prompt": "wash my shirt"}), "pathParameters": {"conversationId": "abc-123"}}
         response = app.lambda_handler(event, None)
 
     body = json.loads(response["body"])
     system_messages = [m for m in body["history"] if m["role"] == "system"]
+    assert body["conversation_id"] == "abc-123"
     assert len(system_messages) == 1
     assert body["history"][3] == {"role": "user", "content": "wash my shirt"}
+    app._load_conversation.assert_called_once_with("abc-123")
+    app._save_conversation.assert_called_once_with("abc-123", body["history"])
+
+
+def test_lambda_handler_returns_404_for_unknown_conversation_id(monkeypatch):
+    monkeypatch.setattr(app, "_load_conversation", MagicMock(return_value=None))
+
+    event = {"body": json.dumps({"prompt": "hi"}), "pathParameters": {"conversationId": "missing"}}
+    response = app.lambda_handler(event, None)
+
+    assert response["statusCode"] == 404
+    app._save_conversation.assert_not_called()
 
 
 def test_summarize_history_leaves_short_history_untouched():
