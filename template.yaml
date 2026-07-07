@@ -69,6 +69,9 @@ Resources:
       - AttributeName: fact_id
         KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+      OnDemandThroughput:
+        MaxReadRequestUnits: 100
+        MaxWriteRequestUnits: 50
 
   # DependsOn the SAM-generated Prod stage (logical id: "<Api logical id><StageName>Stage") so the
   # API key/usage plan attach only once the stage they reference actually exists.
