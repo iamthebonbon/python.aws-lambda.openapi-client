@@ -38,7 +38,7 @@ jobs:
           show_full_output: true
           allowed_bots: claude
           claude_args: |
-            --allowedTools "Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Skill,Bash(git *),Bash(gh *),Bash(python *)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,WebSearch,WebFetch,Skill,Bash(git *),Bash(gh *),Bash(python *),Bash(pip *)"
           prompt: |
             Implement the changes described in this issue or comment:
             Issue/PR title: ${{ github.event.issue.title || github.event.pull_request.title }}
